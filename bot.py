@@ -40,11 +40,10 @@ class Start:
     def get_status(self):
         return self.online
     def change_status(self):
-        self.online = True
-        return self.online
+        return not self.online
     def __str__(self):
         return str(self.online) + str(f' {type(self.online)}')
-begin = Start()
+switch = Start()
 
 class Temperature():
     def __init__(self):
@@ -72,8 +71,8 @@ def message(payload):
     text = payload.get('text')
 
     if user_id != None and BOT_ID != user_id:
-        if begin == True:
-            chat = palm_chat.palmChat(thermos, begin, text)
+        if switch == True:
+            chat = palm_chat.palmChat(thermos, switch, text)
             client.chat_postMessage(channel=channel_id, text=chat.get_palm_response())
             client.chat_postMessage(channel=channel_id, text="```" + str(chat.catalog) + "```")
 
@@ -131,9 +130,19 @@ def handle_start(ack, body, logger):
     channel_id = body['channel_id']
     tone_button_block = TONE_BUTTON_BLOCK
     client.chat_postMessage(channel=channel_id, blocks=tone_button_block["blocks"])
-    global begin
-    begin = begin.change_status()
-    print('/start ', begin)
+    global switch
+    switch = switch.change_status()
+    print('/start ', switch)
+
+@app.command('/quit')
+def handle_start(ack, body, logger):
+    ack()
+    logger.info(body)
+    channel_id = body['channel_id']
+    client.chat_postMessage(channel=channel_id, text='**You have quit the conversation**')
+    global switch
+    switch = switch.change_status()
+    print('/quit ', switch)
 
 # --
 

@@ -5,20 +5,22 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from pathlib import Path
 from dotenv import load_dotenv, find_dotenv
 from flask import Flask, request, Response
-# from slackeventsapi import SlackEventAdapter
+from bson import ObjectId
+from documents import DocumentsHandler
 import google.generativeai as palm
 import string
 import random
 from slackeventsapi import SlackEventAdapter
 from slack_sdk.signature import SignatureVerifier
 from slack_sdk.errors import SlackApiError
-
 from flask import Flask, request, Response
 from my_modules.welcome import WelcomeMessage
 from my_modules.home import HomeDisplay
 from my_modules.toneBlocks import TONE_BUTTON_BLOCK
 from my_modules.handlers import Handlers
-import palm_chat
+from palm import palmChat
+import documents as documents
+import time
 
 env_path = Path('.') / '.env'
 load_dotenv(dotenv_path=env_path)
@@ -31,13 +33,18 @@ handlers = Handlers()
 BOT_ID = client.api_call('auth.test')['user_id']
 print("bot id", BOT_ID)
 
+start = {}
 welcome_message_list = {}
 
-# chat_object = palm_chat.palmChat(temp=0.7, status=False)
-# print('chat_object status: ', chat_object.get_status())
-# print('chat_object temp: ', chat_object.get_temperature())
-# global temperature
-# temperature = 0.7 # default temp
+class Temperature():
+    def __init__(self):
+        self.temperature = 0.7
+    def change_temperature(self, t):
+        self.temperature = t
+        return self
+    def get_temperature(self):
+        return self.temperature
+thermos = Temperature()
 
 def send_welcome_message(channel, user):
     print("send welcome message working")
@@ -50,88 +57,136 @@ def send_welcome_message(channel, user):
         welcome_message_list[channel] = {}
     welcome_message_list[channel][user] = welcome
 
-
 @app.event("message")
 def message(payload):
-    print("message works")
     user_id = payload.get('user')
     channel_id = payload.get('channel')
-    text = payload.get('text')
-    print(text)
+    user_input = payload.get('text')
+    ts = payload.get('ts')
+    print("user id ", user_id)
 
-    if user_id != None and BOT_ID != user_id:
-        if text == 'list 5 fruits. limit your response to 5 words.':
-            client.chat_postMessage(channel=channel_id, text=palm_chat.palmChat.start_chat(user_input=text))
+    if user_id is not None and BOT_ID != user_id:
 
+        if user_id not in start:
+            start[user_id] = False
+
+        if start[user_id] is True:
+            client.reactions_add(name="speech_balloon", channel=channel_id, timestamp=ts)
+            
+            temp = thermos.get_temperature()
+
+            if not DocumentsHandler.check_user_id_exists(user_id):
+                new_document = {
+                    'user_id': user_id,
+                    'catalogs': [{'conversation': []}]
+                }
+                DocumentsHandler.create_document(new_document)
+
+            document = DocumentsHandler.get_document_by_user(user_id)
+            conversation_list = document['catalogs'][-1]['conversation']
+
+            chat = palmChat(user_id, start[user_id], temp, user_input)
+            response = str(chat)
+
+            conversation_list.append({'user': user_input, 'bot': response})
+
+            DocumentsHandler.update_document(user_id, document)
+
+            client.chat_postMessage(channel=channel_id, text=response)
+
+        time.sleep(1)
+            
 @app.action("creative_tone")
 def creative_tone_action_wrapper(ack, body, logger):
     channel_id = body['container']['channel_id']
     temperature = handlers.handle_creative_tone(ack, body, logger)
-    client.chat_postMessage(channel=channel_id, text=f"Your tone has been set to {temperature}!\nPlease ask away: ")
+    global thermos
+    thermos = thermos.change_temperature(temperature)
+    client.chat_postMessage(channel=channel_id, text=f"Your tone has been set to Creative!\nPlease ask away: ")
 
 @app.action("balanced_tone")
 def balanced_tone_action_wrapper(ack, body, logger):
     channel_id = body['container']['channel_id']
     temperature = handlers.handle_balanced_tone(ack, body, logger)
-    client.chat_postMessage(channel=channel_id, text=f"Your tone has been set to {temperature}!\nPlease ask away: ")
+    global thermos
+    thermos = thermos.change_temperature(temperature)
+    client.chat_postMessage(channel=channel_id, text=f"Your tone has been set to Balanced!\nPlease ask away: ")
 
 @app.action("precise_tone")
 def precise_tone_action_wrapper(ack, body, logger):
     channel_id = body['container']['channel_id']
     temperature = handlers.handle_precise_tone(ack, body, logger)
-    client.chat_postMessage(channel=channel_id, text=f"Your tone has been set to {temperature}!\nPlease ask away: ")
+    global thermos
+    thermos = thermos.change_temperature(temperature)
+    client.chat_postMessage(channel=channel_id, text=f"Your tone has been set to Precise!\nPlease ask away: ")
 
 @app.event("reaction_added")
 def reaction(payload):
     user_id = payload.get('user')
     channel_id = payload.get('item',{}).get('channel')
-    # text = payload.get('text')
 
     if f'@{user_id}' not in welcome_message_list:
         return
     
     welcome = welcome_message_list[f'@{user_id}'][user_id]
     welcome.completed = True
-    welcome.channel = channel_id # change channel for welcome message to the actual channel
+    welcome.channel = channel_id
     message = welcome.get_message()
     updated_message = client.chat_update(**message)
     welcome.timestamp = updated_message['ts']
 
-# home page display
 @app.event("app_home_opened")
 def open_home(client,event,logger):
     home_display = HomeDisplay(client,event,logger)
     home_display.display_home()
 
-# -- 
-# boolean statement for bot_status
-def go_online():
-    return True
-
 @app.command('/start')
 def handle_start(ack, body, logger):
     ack()
     logger.info(body)
+    user_id = body['user_id']
+
+    if user_id not in welcome_message_list:
+        welcome_message_list[user_id] = {}
+
+    if user_id not in start:
+        start[user_id] = False
+
     channel_id = body['channel_id']
     tone_button_block = TONE_BUTTON_BLOCK
     client.chat_postMessage(channel=channel_id, blocks=tone_button_block["blocks"])
-    print('handle_start has started', go_online())
-    # palm_chat.palmChat(get_temp(), go_online())
-    # print()
-    # turns bot on
-    # print(palm_chat.palmChat.status_listener())
-    # a.listen(status = bot_status) # call listen
-    # a.chat() #call chat
-    
-    # palm_status = palm_chat.palmChat.listen(bot_status)
 
-# @app.event('message')
-# def listen_user_input(payload):
-#     if 
+    if not DocumentsHandler.check_user_id_exists(user_id):
+        new_document = {
+            'user_id': user_id,
+            'catalogs': [{'conversation': []}]
+        }
+        DocumentsHandler.create_document(new_document)
 
-# --------- PALM CODE ----------
+    start[user_id] = True
+    chat = palmChat(user_id, start[user_id], thermos.get_temperature(), '')
+    client.chat_postMessage(channel=channel_id, text=chat.response)
 
+    print(f'/start status, {start.get_status()}')
 
+@app.command('/quit')
+def handle_quit(ack, body, logger):
+    ack()
+    logger.info(body)
+    user_id = body['user_id']
+    channel_id = body['channel_id']
+
+    if user_id in start:
+        start[user_id] = False
+
+    client.chat_postMessage(channel=channel_id, text="You have quit the conversation")
+
+    if DocumentsHandler.check_user_id_exists(user_id):
+        document = DocumentsHandler.get_document_by_user(user_id)
+        document['catalogs'].append({'conversation': []})
+        DocumentsHandler.update_document(user_id, document)
+
+    print(f'/quit status, {start.get(user_id)}\nTemperature, {thermos.get_temperature()}')
 
 if __name__ == "__main__":
     SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"]).start()

@@ -127,7 +127,7 @@ def message(payload):
 
         if start[user_id] is True:
             client.reactions_add(name="speech_balloon", channel=channel_id, timestamp=ts)
-
+            client.chat_meMessage(channel=channel_id, text='Typing...')
             # client.chat_meMessage(channel=channel_id, text='Typing...')
 
             temp = thermos.get_temperature()

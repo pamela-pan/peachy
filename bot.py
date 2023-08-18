@@ -108,6 +108,8 @@ timeout_thread = threading.Thread(target=check_conversation_timeout)
 timeout_thread.daemon = True  # This allows the thread to exit when the main program exits
 timeout_thread.start()
 
+
+
 @app.event("message")
 def message(payload):
     user_id = payload.get('user')
@@ -125,7 +127,9 @@ def message(payload):
 
         if start[user_id] is True:
             client.reactions_add(name="speech_balloon", channel=channel_id, timestamp=ts)
-            
+
+            # client.chat_meMessage(channel=channel_id, text='Typing...')
+
             temp = thermos.get_temperature()
 
             if not DocumentsHandler.check_user_id_exists(user_id):
